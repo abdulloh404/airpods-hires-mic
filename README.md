@@ -196,7 +196,7 @@ settings or restart the application after selecting `AirPodsHiRes`.
 Record a quick test, press `Ctrl+C` after speaking, then play it back:
 
 ```bash
-parecord --device=AirPodsHiRes test.wav
+parecord --device=AirPodsHiRes --file-format=wav test.wav
 paplay test.wav
 ```
 
