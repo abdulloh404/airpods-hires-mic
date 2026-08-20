@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AirPods Hi-Res Mic
+Comment=Configure the AirPods Hi-Res virtual microphone
+Exec=airpods-hires-mic-desktop
+Icon=airpods-hires-mic
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+Keywords=AirPods;microphone;Bluetooth;PipeWire;
+StartupNotify=true

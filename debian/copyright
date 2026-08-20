@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: airpods-hires-mic
+Source: https://github.com/abdulloh404/airpods-hires-mic
+
+Files: *
+Copyright: 2026 Abdulloh
+License: not-specified
+ The upstream project does not currently include an explicit distribution
+ license. Confirm and add the intended license before publishing this package
+ outside the project owner's own distribution channel.

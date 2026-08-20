@@ -1,0 +1,7 @@
+target/release/airpods-hires-mic usr/bin
+target/release/airpods-battery usr/bin
+target/release/airpods-hires-mic-desktop usr/bin
+packaging/airpods-hires-mic-remove usr/bin
+packaging/airpods-hires-mic.desktop usr/share/applications
+packaging/icons/airpods-hires-mic.svg usr/share/icons/hicolor/scalable/apps
+packaging/environment.example usr/share/doc/airpods-hires-mic/examples

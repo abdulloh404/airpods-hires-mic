@@ -1,18 +1,16 @@
-[package]
-name = "airpods-hires-mic"
+[workspace]
+resolver = "3"
+members = [
+    "crates/airpods-core",
+    "crates/airpods-daemon",
+    "apps/desktop/src-tauri",
+]
+default-members = [
+    "crates/airpods-core",
+    "crates/airpods-daemon",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-build = "build.rs"
-
-[dependencies]
-anyhow = "1.0"
-bluer = { version = "0.17", features = ["bluetoothd", "l2cap"] }
-clap = { version = "4.5", features = ["derive", "env"] }
-env_logger = "0.11"
-futures-util = "0.3"
-libc = "0.2"
-log = "0.4"
-tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
-
-[build-dependencies]
-pkg-config = "0.3"
+authors = ["Abdulloh"]

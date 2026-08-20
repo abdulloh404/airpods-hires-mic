@@ -1,0 +1,6 @@
+# Copy the values into ~/.config/airpods-hires-mic/environment through the
+# desktop application. This example is intentionally not installed as a live
+# configuration file.
+AIRPODS_DEVICE=AA:BB:CC:DD:EE:FF
+AIRPODS_MIC_GAIN_DB=18
+AIRPODS_MIC_LIMITER_DBFS=-3

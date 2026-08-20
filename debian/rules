@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@ --buildsystem=none
+
+override_dh_auto_build:
+	cargo build --locked --release --package airpods-daemon --bin airpods-hires-mic --bin airpods-battery
+	cd apps/desktop && npm ci && npm run tauri -- build --no-bundle

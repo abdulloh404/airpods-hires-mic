@@ -1,0 +1,16 @@
+[Unit]
+Description=AirPods high-resolution virtual microphone
+After=pipewire-pulse.service
+ConditionPathExists=%h/.config/airpods-hires-mic/environment
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/airpods-hires-mic/environment
+ExecCondition=/usr/bin/test -n "${AIRPODS_DEVICE}"
+ExecStart=/usr/bin/airpods-hires-mic --device ${AIRPODS_DEVICE}
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=default.target

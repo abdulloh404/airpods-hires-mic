@@ -2,16 +2,14 @@
 set -euo pipefail
 
 APP_NAME="airpods-hires-mic"
-PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_DIR="${HOME}/.config/${APP_NAME}"
 ENV_FILE="${CONFIG_DIR}/environment"
 
 usage() {
     cat <<'EOF'
 Usage:
-  ./uninstall.sh --package   Remove the Debian package and keep user settings
-  ./uninstall.sh --purge     Purge the package and this user's production settings
-  ./uninstall.sh --dev       Remove only the isolated development service/settings
+  airpods-hires-mic-remove --keep-config
+  airpods-hires-mic-remove --purge
 EOF
 }
 
@@ -21,7 +19,7 @@ if ((EUID == 0)); then
 fi
 
 case "${1:-}" in
-    --package)
+    --keep-config)
         [[ $# -eq 1 ]] || { usage >&2; exit 1; }
         systemctl --user stop "${APP_NAME}.service" 2>/dev/null || true
         exec sudo apt-get remove "${APP_NAME}"
@@ -38,10 +36,6 @@ case "${1:-}" in
         fi
         rmdir -- "${CONFIG_DIR}" 2>/dev/null || true
         echo "Purged ${APP_NAME} and this user's production settings."
-        ;;
-    --dev)
-        [[ $# -eq 1 ]] || { usage >&2; exit 1; }
-        exec "${PROJECT_DIR}/scripts/dev-clean.sh"
         ;;
     --help|-h|"")
         usage
