@@ -2,6 +2,7 @@ use crate::{
     aacp::AacpSession,
     cli::Cli,
     decoder::EldDecoder,
+    dsp::{MIC_GAIN_DB, MIC_LIMIT_DBFS, MicProcessor},
     framing::{demux_audio_sdu, is_audio_sdu},
     virtual_mic::VirtualMic,
 };
@@ -259,6 +260,7 @@ fn decoder_loop(
 ) -> Result<()> {
     let result = (|| {
         let mut decoder = EldDecoder::new().context("AAC-ELD decoder init failed")?;
+        let mut mic_processor = MicProcessor::new();
         let mut virtual_mic = None;
         let mut frames = 0u64;
         let mut decode_errors = 0u64;
@@ -273,7 +275,7 @@ fn decoder_loop(
                 }
             };
             for access_unit in access_units {
-                let frame = match decoder.decode(access_unit) {
+                let mut frame = match decoder.decode(access_unit) {
                     Ok(frame) => frame,
                     Err(error) => {
                         decode_errors += 1;
@@ -291,8 +293,12 @@ fn decoder_loop(
                         frame.audio_object_type,
                         frame.bit_rate
                     );
+                    info!(
+                        "[audio] processing: gain={MIC_GAIN_DB:+.0} dB / limiter={MIC_LIMIT_DBFS:.0} dBFS"
+                    );
                     virtual_mic = Some(VirtualMic::create(frame.sample_rate, frame.channels)?);
                 }
+                mic_processor.process(&mut frame.samples);
                 if !virtual_mic.as_mut().unwrap().write(&frame.samples)? {
                     fifo_drops += 1;
                 }

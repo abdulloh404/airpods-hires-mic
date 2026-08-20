@@ -1,0 +1,20 @@
+[package]
+name = "airpods-hires-mic-desktop"
+version = "0.1.0"
+description = "Desktop settings for AirPods Hi-Res Mic"
+authors = ["Abdulloh"]
+edition = "2024"
+
+[lib]
+name = "airpods_hires_mic_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+airpods-hires-mic = { path = "../.." }
+bluer = { version = "0.17", features = ["bluetoothd"] }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = ["tray-icon"] }
+tokio = { version = "1", features = ["process", "time"] }
