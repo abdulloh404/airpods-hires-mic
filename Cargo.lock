@@ -19,6 +19,7 @@ dependencies = [
  "bluer",
  "clap",
  "env_logger",
+ "futures-util",
  "libc",
  "log",
  "pkg-config",

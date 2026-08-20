@@ -2,7 +2,7 @@ use crate::{
     aacp::AacpSession,
     cli::Cli,
     decoder::EldDecoder,
-    dsp::{MIC_GAIN_DB, MIC_LIMIT_DBFS, MicProcessor},
+    dsp::MicProcessor,
     framing::{demux_audio_sdu, is_audio_sdu},
     virtual_mic::VirtualMic,
 };
@@ -35,7 +35,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     let result = if cli.transport_only {
         receive_transport(&session).await
     } else {
-        receive_and_decode(&mut session).await
+        receive_and_decode(&mut session, cli.mic_gain_db, cli.mic_limiter_dbfs).await
     };
     if let Err(error) = session.stop_audio().await {
         warn!("[aacp] cleanup warning: {error:#}");
@@ -187,10 +187,16 @@ async fn receive_transport(session: &AacpSession) -> Result<()> {
     Ok(())
 }
 
-async fn receive_and_decode(session: &mut AacpSession) -> Result<()> {
+async fn receive_and_decode(
+    session: &mut AacpSession,
+    mic_gain_db: f32,
+    mic_limiter_dbfs: f32,
+) -> Result<()> {
     let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>(AUDIO_QUEUE_CAPACITY);
     let (error_tx, mut error_rx) = mpsc::unbounded_channel::<String>();
-    let decoder_task = tokio::task::spawn_blocking(move || decoder_loop(audio_rx, error_tx));
+    let decoder_task = tokio::task::spawn_blocking(move || {
+        decoder_loop(audio_rx, error_tx, mic_gain_db, mic_limiter_dbfs)
+    });
 
     let mut buffer = vec![0u8; RECEIVE_BUFFER_SIZE];
     let mut packets = 0u64;
@@ -257,10 +263,13 @@ async fn receive_and_decode(session: &mut AacpSession) -> Result<()> {
 fn decoder_loop(
     mut audio_rx: mpsc::Receiver<Vec<u8>>,
     error_tx: mpsc::UnboundedSender<String>,
+    mic_gain_db: f32,
+    mic_limiter_dbfs: f32,
 ) -> Result<()> {
     let result = (|| {
         let mut decoder = EldDecoder::new().context("AAC-ELD decoder init failed")?;
-        let mut mic_processor = MicProcessor::new();
+        let mut mic_processor =
+            MicProcessor::new(mic_gain_db, mic_limiter_dbfs).map_err(anyhow::Error::msg)?;
         let mut virtual_mic = None;
         let mut frames = 0u64;
         let mut decode_errors = 0u64;
@@ -294,7 +303,7 @@ fn decoder_loop(
                         frame.bit_rate
                     );
                     info!(
-                        "[audio] processing: gain={MIC_GAIN_DB:+.0} dB / limiter={MIC_LIMIT_DBFS:.0} dBFS"
+                        "[audio] processing: gain={mic_gain_db:+.1} dB / limiter={mic_limiter_dbfs:.1} dBFS"
                     );
                     virtual_mic = Some(VirtualMic::create(frame.sample_rate, frame.channels)?);
                 }

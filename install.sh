@@ -10,6 +10,8 @@ ENV_FILE="${CONFIG_DIR}/environment"
 USER_SYSTEMD_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${USER_SYSTEMD_DIR}/${SERVICE_NAME}"
 DEVICE=""
+MIC_GAIN_DB="18"
+MIC_LIMITER_DBFS="-3"
 
 if ((EUID == 0)); then
     echo "Do not run this installer with sudo. Run ./install.sh as the desktop user." >&2
@@ -43,11 +45,25 @@ while (($#)); do
     esac
 done
 
-if [[ -z "${DEVICE}" && -r "${ENV_FILE}" ]]; then
+if [[ -r "${ENV_FILE}" ]]; then
     while IFS='=' read -r key value; do
-        if [[ "${key}" == "AIRPODS_DEVICE" ]]; then
-            DEVICE="${value}"
-        fi
+        case "${key}" in
+            AIRPODS_DEVICE)
+                if [[ -z "${DEVICE}" ]]; then
+                    DEVICE="${value}"
+                fi
+                ;;
+            AIRPODS_MIC_GAIN_DB)
+                if [[ -n "${value}" ]]; then
+                    MIC_GAIN_DB="${value}"
+                fi
+                ;;
+            AIRPODS_MIC_LIMITER_DBFS)
+                if [[ -n "${value}" ]]; then
+                    MIC_LIMITER_DBFS="${value}"
+                fi
+                ;;
+        esac
     done < "${ENV_FILE}"
 fi
 
@@ -124,7 +140,8 @@ fi
 
 install -d -m 0755 "${INSTALL_DIR}"
 install -m 0755 "${PROJECT_DIR}/target/release/${APP_NAME}" "${INSTALL_DIR}/${APP_NAME}"
-printf 'AIRPODS_DEVICE=%s\n' "${DEVICE}" > "${ENV_FILE}"
+printf 'AIRPODS_DEVICE=%s\nAIRPODS_MIC_GAIN_DB=%s\nAIRPODS_MIC_LIMITER_DBFS=%s\n' \
+    "${DEVICE}" "${MIC_GAIN_DB}" "${MIC_LIMITER_DBFS}" > "${ENV_FILE}"
 chmod 0644 "${ENV_FILE}"
 install -m 0644 "${PROJECT_DIR}/systemd/${SERVICE_NAME}" "${SERVICE_FILE}"
 

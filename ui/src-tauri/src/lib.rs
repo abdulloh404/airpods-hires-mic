@@ -1,5 +1,7 @@
 mod airpods;
+mod battery;
 mod service;
+mod settings;
 mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,10 +16,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             airpods::get_airpods_status,
+            battery::scan_airpods_battery,
             service::get_service_status,
             service::start_service,
             service::stop_service,
             service::restart_service,
+            settings::get_mic_settings,
+            settings::save_mic_settings,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run AirPods Hi-Res Mic settings");

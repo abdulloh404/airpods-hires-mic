@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "AirPods Hi-Res Mic",
-        "width": 500,
-        "height": 650,
-        "minWidth": 380,
-        "minHeight": 580,
+        "width": 780,
+        "height": 720,
+        "minWidth": 620,
+        "minHeight": 640,
         "resizable": true,
         "decorations": false,
         "center": true
