@@ -1,0 +1,37 @@
+Source: airpods-hires-mic
+Section: sound
+Priority: optional
+Maintainer: Abdulloh <abdulloh404@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13),
+ cargo,
+ rustc,
+ pkg-config,
+ libdbus-1-dev,
+ libfdk-aac-dev,
+ nodejs,
+ npm,
+ libgtk-3-dev,
+ libwebkit2gtk-4.1-dev,
+ libayatana-appindicator3-dev,
+ libssl-dev,
+ libxdo-dev,
+ librsvg2-dev
+Standards-Version: 4.7.4
+Rules-Requires-Root: no
+Homepage: https://github.com/abdulloh404/airpods-hires-mic
+
+Package: airpods-hires-mic
+Architecture: any
+Depends: ${misc:Depends},
+ ${shlibs:Depends},
+ bluez,
+ pulseaudio-utils,
+ sudo,
+ systemd
+Recommends: gnome-shell-extension-appindicator
+Suggests: pipewire-pulse,
+ wireplumber,
+ libspa-0.2-bluetooth
+Description: high-resolution AirPods virtual microphone for Linux
+ Exposes the proprietary AirPods microphone stream as a PipeWire virtual
+ microphone while leaving the active Bluetooth playback profile unchanged.

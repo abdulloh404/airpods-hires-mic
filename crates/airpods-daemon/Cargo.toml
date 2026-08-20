@@ -1,0 +1,24 @@
+[package]
+name = "airpods-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+autobins = false
+
+[[bin]]
+name = "airpods-hires-mic"
+path = "src/main.rs"
+
+[[bin]]
+name = "airpods-battery"
+path = "src/bin/airpods-battery.rs"
+
+[dependencies]
+airpods-core = { path = "../airpods-core" }
+anyhow = "1.0"
+bluer = "0.17"
+clap = { version = "4.5", features = ["derive", "env"] }
+env_logger = "0.11"
+libc = "0.2"
+log = "0.4"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }

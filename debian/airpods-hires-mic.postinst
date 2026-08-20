@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "configure" ]; then
+    deb-systemd-invoke --user restart airpods-hires-mic.service || true
+fi
+
+exit 0

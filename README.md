@@ -1,323 +1,138 @@
 # AirPods Hi-Res Mic for Linux
 
-`airpods-hires-mic` exposes the proprietary microphone stream from AirPods as a
-virtual Linux microphone while keeping Bluetooth playback on the high-quality
-A2DP/AAC profile.
-
-The program connects to the AirPods AACP L2CAP channel, receives AAC-ELD audio,
-decodes it with FDK-AAC, and publishes mono PCM through PipeWire's PulseAudio
-compatibility layer as:
-
-```text
-AirPods Hi-Res Mic (source name: AirPodsHiRes)
-```
+AirPods Hi-Res Mic exposes the proprietary AirPods microphone stream as a
+virtual Linux microphone while leaving Bluetooth playback on A2DP/AAC. It ships
+as a Rust audio daemon, a battery diagnostic CLI, and a Tauri 2 desktop settings
+application.
 
 > [!IMPORTANT]
-> This is experimental, unofficial software. It uses an undocumented AirPods
-> protocol and may stop working after firmware updates. It is not affiliated
-> with or endorsed by Apple.
+> This is experimental, unofficial software based on an undocumented AirPods
+> protocol. It is not affiliated with or endorsed by Apple.
 
-## What it does
+## Features
 
-- Receives the AirPods proprietary high-resolution microphone stream over BlueZ.
-- Decodes AAC-ELD with `libfdk-aac`.
-- Creates a mono, 16-bit, 64 kHz virtual microphone named `AirPodsHiRes`.
-- Runs as a per-user `systemd` service and starts automatically after login.
-- Sends the AirPods microphone STOP command and removes the virtual source on
-  normal shutdown.
-- Does not change the active Bluetooth profile, A2DP codec, AAC settings,
-  PipeWire configuration, or files under `/etc`.
+- Receives the AACP microphone stream without switching to HFP/HSP.
+- Decodes AAC-ELD with FDK-AAC and creates the `AirPodsHiRes` virtual source.
+- Scans Apple BLE advertisements for left, right, and case battery levels.
+- Configures microphone gain and limiter from the desktop UI.
+- Runs the microphone engine as a per-user systemd service.
+- Keeps development and installed services/configuration completely separate.
 
-## Compatibility
-
-The current implementation is Linux-only and the installer supports
-Ubuntu/Debian systems.
-
-| Component | Project requirement | Verified environment |
-| --- | --- | --- |
-| Rust | `1.85` or newer (Rust 2024 edition) | `1.97.1` |
-| FDK-AAC development library | `2.0` or newer, enforced at build time | `2.0.2` |
-| PipeWire | `0.3.48` or newer supported baseline | `0.3.48` |
-| pipewire-pulse | Same version family as PipeWire; Pulse server must be reachable | `0.3.48` |
-| WirePlumber | `0.4.8` or newer supported baseline | `0.4.8` |
-| BlueZ | `5.64` or newer supported baseline | `5.64` |
-
-Only Rust and FDK-AAC have hard version checks in the build. The remaining
-versions are the oldest configuration tested by this project; older versions
-may work but are not supported yet.
-
-The project has been tested by its author with AirPods Pro. Other AirPods and
-Beats models have not yet been verified.
-
-## Download
-
-Clone the repository:
-
-```bash
-git clone https://github.com/abdulloh404/airpods-linux.git
-cd airpods-linux
-```
-
-Alternatively, download the source ZIP from:
+## Project layout
 
 ```text
-https://github.com/abdulloh404/airpods-linux/archive/refs/heads/main.zip
+crates/airpods-core/       AACP, BLE battery, decoder, DSP, framing
+crates/airpods-daemon/     audio daemon, virtual microphone, command-line tools
+apps/desktop/              Tauri 2 + React + TypeScript desktop application
+debian/                    Debian package metadata and user service
+packaging/                 desktop entry, icons, templates and examples
+scripts/                   development and package build helpers
+docs/                      installation, development and packaging guides
 ```
 
-Extract it, open a terminal in `airpods-linux-main`, and make the scripts
-executable if necessary:
+## Install a Debian package
+
+Download the `.deb` matching the machine architecture, then install it with
+APT so runtime dependencies are resolved:
 
 ```bash
-chmod +x install.sh uninstall.sh
+sudo apt install ./airpods-hires-mic_0.1.0_amd64.deb
 ```
 
-## Prerequisites
+On GNOME, install and enable the recommended **AppIndicator and
+KStatusNotifierItem Support** extension before relying on close-to-tray
+behavior.
 
-1. Install Rust `1.85` or newer using [rustup](https://rustup.rs/), then open a
-   new terminal and verify it:
+Open **AirPods Hi-Res Mic** from the application menu. On first launch:
 
-   ```bash
-   rustc --version
-   cargo --version
-   ```
+1. Connect the AirPods in the desktop Bluetooth settings.
+2. Select the connected device in the application.
+3. Save the microphone gain/limiter settings if desired.
+4. Press **Start mic**.
 
-2. Use PipeWire with its PulseAudio compatibility service and WirePlumber.
-   Verify the running audio server:
+The package installs the system-wide user unit, but the unit only runs after
+the current user has selected a device. It does not pair devices or modify the
+active Bluetooth profile, PipeWire configuration, A2DP, or AAC settings.
 
-   ```bash
-   pactl info
-   systemctl --user status pipewire.service pipewire-pulse.service wireplumber.service
-   ```
-
-   `pactl info` should report a reachable PulseAudio server, normally
-   `PulseAudio (on PipeWire ...)`.
-
-3. Pair and connect the AirPods before installing:
-
-   ```bash
-   bluetoothctl devices
-   bluetoothctl connect AA:BB:CC:DD:EE:FF
-   bluetoothctl info AA:BB:CC:DD:EE:FF
-   ```
-
-   Replace the example address with the AirPods MAC address. The last command
-   must show `Connected: yes`.
-
-The installer checks and, when necessary, installs these Ubuntu/Debian build
-packages with `apt`:
-
-```text
-build-essential
-pkg-config
-libdbus-1-dev
-libfdk-aac-dev (version 2.0 or newer)
-bluez
-pulseaudio-utils
-```
-
-It intentionally does not replace or reconfigure the machine's existing audio
-stack. If PipeWire, pipewire-pulse, WirePlumber, and the BlueZ PipeWire plugin
-are not already installed, install the distribution-supported packages first.
-
-On Ubuntu, `libfdk-aac-dev` may require the `multiverse` repository:
-
-```bash
-sudo add-apt-repository multiverse
-sudo apt update
-```
-
-## Install and start
-
-Do not run the installer itself with `sudo`. Run it as the logged-in desktop
-user and pass the connected AirPods MAC address:
-
-```bash
-./install.sh --device AA:BB:CC:DD:EE:FF
-```
-
-The installer will:
-
-1. Check the OS, required commands, dependencies, MAC address, and user
-   `systemd` session.
-2. Build a release binary with Cargo.
-3. Install the binary to `~/.local/bin/airpods-hires-mic`.
-4. Save the MAC address in
-   `~/.config/airpods-hires-mic/environment`.
-5. Install and enable
-   `~/.config/systemd/user/airpods-hires-mic.service`.
-6. Start the service immediately.
-
-Check the service:
+Check the installed service:
 
 ```bash
 systemctl --user status airpods-hires-mic.service
-```
-
-Follow live logs:
-
-```bash
 journalctl --user -u airpods-hires-mic.service -f
-```
-
-A healthy stream normally includes messages similar to:
-
-```text
-[bt] connected AA:BB:CC:DD:EE:FF on PSM 0x1001
-[aacp] session initialized
-[aacp] hi-res microphone START sent
-[pw] virtual microphone created: AirPodsHiRes
-[audio] packets=... dropped=0
-```
-
-The virtual microphone is created only after the first valid AirPods audio
-frame arrives. It may therefore appear a moment after the service starts.
-
-## Use the microphone
-
-List available input sources:
-
-```bash
 pactl list short sources
 ```
 
-Select **AirPods Hi-Res Mic** in GNOME Sound settings or in the application's
-microphone selector. Do not select the normal Bluetooth AirPods microphone,
-because that source uses HFP/HSP and may change the headset profile.
+## Battery CLI
 
-Optionally make the virtual source the default microphone:
+Open the AirPods case near the computer and run:
 
 ```bash
-pactl set-default-source AirPodsHiRes
+airpods-battery
 ```
 
-Applications that were already open may cache the old input. Reopen their audio
-settings or restart the application after selecting `AirPodsHiRes`.
+The scan stops after receiving a supported AirPods advertisement or after its
+10-second timeout. Unencrypted advertisements normally expose battery values in
+10% increments and may omit the case value.
 
-Record a quick test, press `Ctrl+C` after speaking, then play it back:
+## Development
+
+Development uses `airpods-hires-mic-dev.service` and `dev.environment`; it never
+controls the installed production service.
 
 ```bash
-parecord --device=AirPodsHiRes --file-format=wav test.wav
-paplay test.wav
+./install.sh --dev --device AA:BB:CC:DD:EE:FF
+./scripts/dev.sh
 ```
 
-## Service commands
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete workflow.
+
+## Build a `.deb`
+
+Install the build dependencies listed in `debian/control`, then run:
 
 ```bash
-# Start
-systemctl --user start airpods-hires-mic.service
-
-# Stop and clean up the virtual microphone
-systemctl --user stop airpods-hires-mic.service
-
-# Restart after reconnecting the AirPods
-systemctl --user restart airpods-hires-mic.service
-
-# Enable automatic start after login
-systemctl --user enable airpods-hires-mic.service
-
-# Disable automatic start
-systemctl --user disable airpods-hires-mic.service
+./scripts/build-deb.sh
+./scripts/verify-deb.sh ../airpods-hires-mic_0.1.0_amd64.deb
 ```
 
-The service restarts after failures with a 10-second delay. It does not connect
-the AirPods automatically; BlueZ must report the configured device as connected.
+Build on the oldest supported Linux baseline to avoid requiring a newer glibc
+than downstream machines provide. See [docs/PACKAGING.md](docs/PACKAGING.md).
 
-## Update or change the AirPods
+## Remove
 
-Pull the latest source and reinstall:
+Keep this user's settings:
 
 ```bash
-git pull
-./install.sh
+airpods-hires-mic-remove --keep-config
 ```
 
-When no `--device` is supplied, the installer reuses the MAC address from the
-existing environment file. To use a different pair of AirPods:
+Purge the package and this user's production settings:
 
 ```bash
-./install.sh --device 11:22:33:44:55:66
+airpods-hires-mic-remove --purge
 ```
 
-## Prevent Bluetooth profile auto-switching
+The helper stops the current user's microphone service before invoking APT.
+From a source checkout, `./uninstall.sh --package` and `--purge` provide the
+same behavior.
 
-This program never changes the Bluetooth profile. Some communication
-applications can ask WirePlumber to select the real Bluetooth microphone,
-which switches playback from A2DP/AAC to HFP/HSP.
-
-First, set `AirPodsHiRes` as the default source and select it explicitly inside
-the application. On the verified WirePlumber 0.4 setup, automatic headset
-profile switching can also be disabled by creating:
-
-```text
-~/.config/wireplumber/policy.lua.d/90-airpods-hires-mic.lua
-```
-
-with this content:
-
-```lua
-bluetooth_policy.policy["media-role.use-headset-profile"] = false
-```
-
-Apply the change by logging out and back in, or by restarting WirePlumber:
+Remove only the isolated development setup:
 
 ```bash
-systemctl --user restart wireplumber.service
+./uninstall.sh --dev
 ```
 
-Restarting WirePlumber temporarily interrupts desktop audio. This policy affects
-automatic switching for all Bluetooth headsets in the user session, but manual
-profile selection remains available. WirePlumber 0.5 uses a different
-configuration format; do not copy this Lua fragment to a 0.5 installation.
+Package removal never changes Bluetooth pairings, the audio stack, A2DP/AAC, or
+the optional WirePlumber policies managed by the user.
 
-This optional policy is not installed or removed by this project.
+## Compatibility and limitations
 
-## Diagnostic mode
+The verified baseline is Ubuntu 22.04, BlueZ 5.64, PipeWire/pipewire-pulse
+0.3.48, WirePlumber 0.4.8, FDK-AAC 2.0.2, and AirPods Pro. Rust 1.85 or newer is
+required only when building from source.
 
-Run transport diagnostics without decoding audio or creating a virtual
-microphone:
+The repository does not yet declare a redistribution license. Select and add a
+license before publishing `.deb` artifacts publicly.
 
-```bash
-airpods-hires-mic --device AA:BB:CC:DD:EE:FF --transport-only --verbose
-```
-
-Only one instance can run at a time. Stop the user service before starting a
-manual diagnostic instance.
-
-## Uninstall
-
-Run from the cloned source directory:
-
-```bash
-./uninstall.sh
-```
-
-The uninstaller disables and stops the user service, removes the installed
-binary and project configuration, unloads the owned virtual microphone module,
-and removes its FIFO and lock files.
-
-It does not remove system packages, Rust, the cloned source directory, Bluetooth
-pairings, PipeWire settings, A2DP, or AAC configuration. If you manually created
-the optional WirePlumber policy above, remove that file yourself.
-
-## Troubleshooting
-
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for dependency checks, detailed
-verification, profile-switch guidance, common errors, and complete cleanup.
-
-## Architecture
-
-```text
-AirPods
-  -> Bluetooth BR/EDR L2CAP, AACP PSM 0x1001
-  -> AACP 0x58 audio SDUs
-  -> AAC-ELD access units
-  -> FDK-AAC decoder
-  -> mono s16le PCM, 64 kHz clock
-  -> per-user FIFO in XDG_RUNTIME_DIR
-  -> pactl module-pipe-source
-  -> AirPodsHiRes virtual microphone
-  -> browser / meeting / recording application
-```
-
-The modules are separated so that the transport, framing, decoder, virtual
-microphone, and application lifecycle can later be reused by a GTK4 frontend.
+Detailed installation, verification, troubleshooting, and cleanup steps are in
+[docs/INSTALLATION.md](docs/INSTALLATION.md).
