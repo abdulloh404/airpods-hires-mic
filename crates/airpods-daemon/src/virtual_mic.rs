@@ -1,21 +1,33 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use libspa::{
+    pod::{Object, Property, PropertyFlags, Value, serialize::PodSerializer},
+    utils::Id,
+};
+use libspa_sys as spa_sys;
+use pipewire as pw;
+use pw::prelude::*;
 use std::{
-    ffi::CString,
-    fs::{self, File, OpenOptions},
-    io::{ErrorKind, Write},
-    os::unix::{ffi::OsStrExt, fs::FileTypeExt, fs::OpenOptionsExt},
-    path::{Path, PathBuf},
-    process::Command,
+    collections::VecDeque,
+    io::Cursor,
+    mem::size_of,
+    sync::{Arc, Mutex, TryLockError, mpsc::SyncSender},
+    thread::{self, JoinHandle},
 };
 
-pub const SOURCE_NAME: &str = "Microphone-Abdulloh's Airpods Pro";
-pub const SOURCE_DESCRIPTION: &str = "Abdulloh's Airpods Pro";
-pub const FIFO_NAME: &str = "airpods-hires-mic.fifo";
+pub const SOURCE_NAME: &str = "Virtual_Microphone_Abdullohs_AirPods_Pro";
+pub const SOURCE_DESCRIPTION: &str = "Virtual Microphone - Abdulloh's AirPods Pro";
+
+const MAX_QUEUED_AUDIO_MILLISECONDS: usize = 250;
+const BYTES_PER_SAMPLE: usize = size_of::<i16>();
+
+type StartupResult = std::result::Result<(), String>;
+type AudioQueue = Arc<Mutex<VecDeque<i16>>>;
 
 pub struct VirtualMic {
-    fifo_path: PathBuf,
-    fifo: File,
-    module_id: Option<u32>,
+    samples: AudioQueue,
+    max_queued_samples: usize,
+    shutdown_sender: Option<pw::channel::Sender<()>>,
+    thread: Option<JoinHandle<Result<()>>>,
 }
 
 impl VirtualMic {
@@ -25,100 +37,82 @@ impl VirtualMic {
                 "AirPods virtual microphone requires mono PCM, decoder reported {channels} channels"
             );
         }
-        let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
-            .context("XDG_RUNTIME_DIR is not set; run inside the desktop user session")?;
-        let fifo_path = PathBuf::from(runtime_dir).join(FIFO_NAME);
-        unload_named_source(&fifo_path);
-        remove_owned_fifo(&fifo_path)?;
-
-        let path = CString::new(fifo_path.as_os_str().as_bytes())
-            .context("runtime FIFO path contains a NUL byte")?;
-        // SAFETY: path is a valid C string; mode grants access only to the current user.
-        if unsafe { libc::mkfifo(path.as_ptr(), 0o600) } != 0 {
-            return Err(std::io::Error::last_os_error())
-                .context("failed to create microphone FIFO");
+        if sample_rate == 0 {
+            bail!("AirPods virtual microphone requires a non-zero sample rate");
         }
 
-        let fifo = match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(&fifo_path)
-        {
-            Ok(file) => file,
+        let max_queued_samples =
+            (sample_rate as usize).saturating_mul(MAX_QUEUED_AUDIO_MILLISECONDS) / 1_000;
+        let samples = Arc::new(Mutex::new(VecDeque::with_capacity(max_queued_samples)));
+        let process_samples = Arc::clone(&samples);
+        let (shutdown_sender, shutdown_receiver) = pw::channel::channel();
+        let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(1);
+        let thread = thread::Builder::new()
+            .name("airpods-pipewire-source".into())
+            .spawn(move || {
+                let result = run_pipewire_source(
+                    sample_rate,
+                    process_samples,
+                    shutdown_receiver,
+                    &ready_sender,
+                );
+                if let Err(error) = &result {
+                    let _ = ready_sender.try_send(Err(format!("{error:#}")));
+                }
+                result
+            })
+            .context("failed to start PipeWire virtual microphone thread")?;
+
+        let ready = match ready_receiver.recv() {
+            Ok(ready) => ready,
             Err(error) => {
-                let _ = fs::remove_file(&fifo_path);
-                return Err(error).context("failed to open microphone FIFO");
+                let _ = thread.join();
+                return Err(error).context("PipeWire virtual microphone stopped during startup");
             }
         };
-
-        let args = module_args(&fifo_path, sample_rate);
-        let output = Command::new("pactl")
-            .args(&args)
-            .output()
-            .context("failed to run pactl load-module")?;
-        if !output.status.success() {
-            let _ = fs::remove_file(&fifo_path);
-            bail!(
-                "module-pipe-source failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+        if let Err(error) = ready {
+            let _ = thread.join();
+            bail!("failed to create PipeWire virtual microphone: {error}");
         }
-        let module_id = match String::from_utf8(output.stdout)
-            .context("pactl returned a non-UTF-8 module id")
-            .and_then(|value| {
-                value
-                    .trim()
-                    .parse::<u32>()
-                    .context("pactl returned an invalid module id")
-            }) {
-            Ok(module_id) => module_id,
-            Err(error) => {
-                unload_named_source(&fifo_path);
-                let _ = fs::remove_file(&fifo_path);
-                return Err(error);
-            }
-        };
 
-        log::info!("[pw] virtual microphone created: {SOURCE_NAME} (module {module_id})");
+        log::info!("[pw] virtual microphone created: {SOURCE_DESCRIPTION}");
         Ok(Self {
-            fifo_path,
-            fifo,
-            module_id: Some(module_id),
+            samples,
+            max_queued_samples,
+            shutdown_sender: Some(shutdown_sender),
+            thread: Some(thread),
         })
     }
 
     pub fn write(&mut self, samples: &[i16]) -> Result<bool> {
-        let mut bytes = Vec::with_capacity(samples.len() * 2);
-        for sample in samples {
-            bytes.extend_from_slice(&sample.to_le_bytes());
+        if self.thread.as_ref().is_none_or(JoinHandle::is_finished) {
+            bail!("PipeWire virtual microphone thread is not running");
         }
-        match self.fifo.write_all(&bytes) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(false),
-            Err(error) => Err(error).context("virtual microphone FIFO write failed"),
+
+        match self.samples.try_lock() {
+            Ok(mut queued) => {
+                if samples.len() > self.max_queued_samples.saturating_sub(queued.len()) {
+                    return Ok(false);
+                }
+                queued.extend(samples.iter().copied());
+                Ok(true)
+            }
+            Err(TryLockError::WouldBlock) => Ok(false),
+            Err(TryLockError::Poisoned(_)) => {
+                bail!("PipeWire virtual microphone audio queue is unavailable")
+            }
         }
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
-        let mut first_error = None;
-        if let Some(module_id) = self.module_id.take() {
-            match Command::new("pactl")
-                .args(["unload-module", &module_id.to_string()])
-                .status()
-            {
-                Ok(status) if status.success() => {}
-                Ok(status) => {
-                    first_error = Some(anyhow::anyhow!("pactl unload-module exited with {status}"))
-                }
-                Err(error) => first_error = Some(error.into()),
+        if let Some(sender) = self.shutdown_sender.take() {
+            let _ = sender.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            match thread.join() {
+                Ok(result) => result.context("PipeWire virtual microphone stopped with an error"),
+                Err(_) => bail!("PipeWire virtual microphone thread panicked"),
             }
-        }
-        if let Err(error) = remove_owned_fifo(&self.fifo_path) {
-            first_error.get_or_insert(error);
-        }
-        if let Some(error) = first_error {
-            Err(error.context("virtual microphone cleanup failed"))
         } else {
             Ok(())
         }
@@ -133,72 +127,138 @@ impl Drop for VirtualMic {
     }
 }
 
-fn module_args(fifo_path: &Path, sample_rate: u32) -> Vec<String> {
-    vec![
-        "load-module".into(),
-        "module-pipe-source".into(),
-        format!("source_name={SOURCE_NAME}"),
-        format!("file={}", fifo_path.display()),
-        "format=s16le".into(),
-        format!("rate={sample_rate}"),
-        "channels=1".into(),
-        "channel_map=mono".into(),
-        format!("source_properties=device.description=\"{SOURCE_DESCRIPTION}\""),
-    ]
+fn run_pipewire_source(
+    sample_rate: u32,
+    samples: AudioQueue,
+    shutdown_receiver: pw::channel::Receiver<()>,
+    ready_sender: &SyncSender<StartupResult>,
+) -> Result<()> {
+    let mainloop = pw::MainLoop::new().context("failed to create the PipeWire main loop")?;
+    let _shutdown_receiver = shutdown_receiver.attach(&mainloop, {
+        let mainloop = mainloop.clone();
+        move |_| mainloop.quit()
+    });
+    let stream_error = Arc::new(Mutex::new(None));
+    let listener_error = Arc::clone(&stream_error);
+    let error_mainloop = mainloop.clone();
+    let stream = pw::stream::Stream::with_user_data(
+        &mainloop,
+        SOURCE_NAME,
+        pw::properties! {
+            *pw::keys::NODE_NAME => SOURCE_NAME,
+            *pw::keys::NODE_NICK => SOURCE_DESCRIPTION,
+            *pw::keys::NODE_DESCRIPTION => SOURCE_DESCRIPTION,
+            *pw::keys::DEVICE_DESCRIPTION => SOURCE_DESCRIPTION,
+            *pw::keys::MEDIA_CLASS => "Audio/Source",
+            *pw::keys::MEDIA_TYPE => "Audio",
+            *pw::keys::NODE_VIRTUAL => "true",
+            *pw::keys::NODE_AUTOCONNECT => "false",
+            *pw::keys::NODE_ALWAYS_PROCESS => "true",
+            *pw::keys::NODE_PAUSE_ON_IDLE => "false",
+        },
+        samples,
+    )
+    .state_changed(move |_, state| {
+        if let pw::stream::StreamState::Error(error) = state {
+            log::error!("[pw] virtual microphone stream error: {error}");
+            if let Ok(mut stream_error) = listener_error.lock() {
+                *stream_error = Some(error);
+            }
+            error_mainloop.quit();
+        }
+    })
+    .process(process_stream_buffer)
+    .create()
+    .context("failed to create the PipeWire source stream")?;
+
+    let pipewire_sample_rate =
+        i32::try_from(sample_rate).context("microphone sample rate is too large for PipeWire")?;
+    let format_object = Object {
+        type_: spa_sys::SPA_TYPE_OBJECT_Format,
+        id: spa_sys::SPA_PARAM_EnumFormat,
+        properties: vec![
+            pod_property(
+                spa_sys::SPA_FORMAT_mediaType,
+                Value::Id(Id(spa_sys::SPA_MEDIA_TYPE_audio)),
+            ),
+            pod_property(
+                spa_sys::SPA_FORMAT_mediaSubtype,
+                Value::Id(Id(spa_sys::SPA_MEDIA_SUBTYPE_raw)),
+            ),
+            pod_property(
+                spa_sys::SPA_FORMAT_AUDIO_format,
+                Value::Id(Id(spa_sys::SPA_AUDIO_FORMAT_S16_LE)),
+            ),
+            pod_property(
+                spa_sys::SPA_FORMAT_AUDIO_rate,
+                Value::Int(pipewire_sample_rate),
+            ),
+            pod_property(spa_sys::SPA_FORMAT_AUDIO_channels, Value::Int(1)),
+        ],
+    };
+    let format_bytes =
+        PodSerializer::serialize(Cursor::new(Vec::new()), &Value::Object(format_object))
+            .map_err(|error| anyhow!("failed to serialize PipeWire audio format: {error:?}"))?
+            .0
+            .into_inner();
+    let mut params = [format_bytes.as_ptr().cast::<spa_sys::spa_pod>()];
+
+    stream
+        .connect(
+            pw::spa::Direction::Output,
+            None,
+            pw::stream::StreamFlags::MAP_BUFFERS | pw::stream::StreamFlags::RT_PROCESS,
+            &mut params,
+        )
+        .context("failed to connect the PipeWire source stream")?;
+    ready_sender
+        .send(Ok(()))
+        .map_err(|_| anyhow!("virtual microphone startup receiver disconnected"))?;
+
+    mainloop.run();
+    if let Some(error) = stream_error
+        .lock()
+        .map_err(|_| anyhow!("PipeWire stream error state is unavailable"))?
+        .take()
+    {
+        bail!("PipeWire virtual microphone stream failed: {error}");
+    }
+    Ok(())
 }
 
-fn remove_owned_fifo(path: &Path) -> Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_fifo() => {
-            fs::remove_file(path).context("failed to remove microphone FIFO")
-        }
-        Ok(_) => bail!("refusing to remove non-FIFO path: {}", path.display()),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).context("failed to inspect microphone FIFO"),
+fn pod_property(key: u32, value: Value) -> Property {
+    Property {
+        key,
+        flags: PropertyFlags::empty(),
+        value,
     }
 }
 
-fn unload_named_source(fifo_path: &Path) {
-    let Ok(output) = Command::new("pactl")
-        .args(["list", "short", "modules"])
-        .output()
-    else {
+fn process_stream_buffer(stream: &pw::stream::Stream<AudioQueue>, samples: &mut AudioQueue) {
+    let Some(mut buffer) = stream.dequeue_buffer() else {
         return;
     };
-    let expected_file = format!("file={}", fifo_path.display());
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let mut fields = line.splitn(4, '\t');
-        let (Some(module_id), Some(module_name), Some(module_args)) =
-            (fields.next(), fields.next(), fields.next())
-        else {
-            continue;
-        };
-        let owns_source = module_args
-            .split_whitespace()
-            .any(|argument| argument == format!("source_name={SOURCE_NAME}"));
-        let owns_fifo = module_args
-            .split_whitespace()
-            .any(|argument| argument == expected_file);
-        if module_name == "module-pipe-source" && owns_source && owns_fifo {
-            let _ = Command::new("pactl")
-                .args(["unload-module", module_id])
-                .status();
+    let Some(data) = buffer.datas_mut().first_mut() else {
+        return;
+    };
+    let size = match data.data() {
+        Some(output) => {
+            output.fill(0);
+            let size = output.len() - (output.len() % BYTES_PER_SAMPLE);
+            if let Ok(mut queued) = samples.try_lock() {
+                for bytes in output[..size].chunks_exact_mut(BYTES_PER_SAMPLE) {
+                    let Some(sample) = queued.pop_front() else {
+                        break;
+                    };
+                    bytes.copy_from_slice(&sample.to_le_bytes());
+                }
+            }
+            size
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn module_arguments_do_not_modify_bluetooth_profiles() {
-        let args = module_args(Path::new("/run/user/1000/test.fifo"), 64_000);
-        let joined = args.join(" ");
-        assert!(joined.contains("module-pipe-source"));
-        assert!(joined.contains("rate=64000"));
-        assert!(!joined.contains("set-card-profile"));
-        assert!(!joined.contains("a2dp"));
-        assert!(!joined.contains("headset"));
-    }
+        None => 0,
+    };
+    let chunk = data.chunk_mut();
+    *chunk.offset_mut() = 0;
+    *chunk.stride_mut() = BYTES_PER_SAMPLE as i32;
+    *chunk.size_mut() = size as u32;
 }

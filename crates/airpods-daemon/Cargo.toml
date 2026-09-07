@@ -20,5 +20,9 @@ bluer = "0.17"
 clap = { version = "4.5", features = ["derive", "env"] }
 env_logger = "0.11"
 libc = "0.2"
+libspa = "=0.6.0"
+libspa-sys = "=0.6.0"
 log = "0.4"
+pipewire = "=0.6.0"
+pipewire-sys = "=0.6.0"
 tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
