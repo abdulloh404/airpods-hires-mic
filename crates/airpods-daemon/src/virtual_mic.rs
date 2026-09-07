@@ -8,8 +8,8 @@ use std::{
     process::Command,
 };
 
-pub const SOURCE_NAME: &str = "AirPodsHiRes";
-pub const SOURCE_DESCRIPTION: &str = "AirPods Hi-Res Mic";
+pub const SOURCE_NAME: &str = "Microphone-Abdulloh's Airpods Pro";
+pub const SOURCE_DESCRIPTION: &str = "Abdulloh's Airpods Pro";
 pub const FIFO_NAME: &str = "airpods-hires-mic.fifo";
 
 pub struct VirtualMic {
