@@ -14,8 +14,8 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-pub const SOURCE_NAME: &str = "Virtual_Microphone_Abdullohs_AirPods_Pro";
-pub const SOURCE_DESCRIPTION: &str = "Virtual Microphone - Abdulloh's AirPods Pro";
+pub const SOURCE_NAME: &str = "Microphone_Virtual_Abdullohs_AirPods_Pro";
+pub const SOURCE_DESCRIPTION: &str = "Microphone virtual - Abdulloh's AirPods Pro";
 
 const MAX_QUEUED_AUDIO_MILLISECONDS: usize = 250;
 const BYTES_PER_SAMPLE: usize = size_of::<i16>();
